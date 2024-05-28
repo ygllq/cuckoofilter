@@ -21,7 +21,6 @@ type Filter struct {
 	count    uint64
 	maxRetry int
 	kicks    int
-	kickBack int
 
 	slots []uint64
 }
@@ -53,30 +52,47 @@ func New(num uint64) *Filter {
 }
 
 var (
-	fph = crc32.NewIEEE()
-	idh = xxhash.New()
+	crcHash = crc32.NewIEEE()
+	idxHash = xxhash.New()
+)
+
+const (
+	maxHashRetry = 10
+
+	fpFallback uint16 = 0xBC
 )
 
 func fingerprint(val []byte) uint16 {
-	fph.Reset()
-	fph.Write(val)
-	hv := fph.Sum32()
+	crcHash.Reset()
+	crcHash.Write(val)
+	hv := crcHash.Sum32()
 	fp := uint16(hv)
+	if fp != 0 {
+		return fp
+	}
 	// this library use 0 to identify slot is empty
 	// so fingerprint cannot be 0
+	for i := 0; i < maxHashRetry; i++ {
+		crcHash.Write(val)
+		hv = crcHash.Sum32()
+		fp = uint16(hv)
+		if fp != 0 {
+			break
+		}
+	}
 	if fp == 0 {
-		fp = uint16(hv>>16) ^ uint16(hv)
+		fp = fpFallback
 	}
 	return fp
 }
 
 func hashv(val []byte) uint64 {
-	idh.Reset()
-	_, err := idh.Write(val)
+	idxHash.Reset()
+	_, err := idxHash.Write(val)
 	if err != nil {
 		panic(err)
 	}
-	return idh.Sum64()
+	return idxHash.Sum64()
 }
 
 func u16bytes(v uint16) []byte {
@@ -160,20 +176,6 @@ func (cf *Filter) kickOut(idx uint64, fingerprint uint16, n int) error {
 	slot := cf.slots[idx]
 	fp := uint16(slot >> 48)
 	cf.slots[idx] = slot<<16 | uint64(fingerprint)
-	// si := slotIndex(slot, fingerprint)
-	// if si >= 0 {
-	// 	cf.kickBack++
-	// }
-	// // the kick element index
-	// k := uint8(fingerprint & 0x03)
-	// if int(k) == si {
-	// 	k = uint8((si + 1) % 4)
-	// }
-	// // get the kick element's fingerprint
-	// fp := uint16((slot >> (k * 16)) & 0xFFFF)
-	// // store replaced fingerprint
-	// cf.slots[idx] = (slot & masks[k]) | uint64(fingerprint)<<(k*16)
-	// // calculate the next slot to kick out
 	nextIndex := idx ^ (hashv(u16bytes(fp)) % cf.snum)
 	return cf.kickOut(nextIndex, fp, n+1)
 }

@@ -59,7 +59,7 @@ func TestCuckooFilterInit(t *testing.T) {
 	}
 }
 
-func TestCuckooFilterAdd(t *testing.T) {
+func TestCuckooFilterOps(t *testing.T) {
 	initSize := uint64(1 << 20)
 	cf := New(initSize)
 
